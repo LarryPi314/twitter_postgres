@@ -130,7 +130,6 @@ def insert_tweet(connection,tweet):
             name,
             location,
             description,
-            geo_enabled,
             withheld_in_countries
         ) VALUES (
             :id_users,
@@ -147,7 +146,6 @@ def insert_tweet(connection,tweet):
             :name,
             :location,
             :description,
-            :geo_enabled,
             :withheld_in_countries
         )
         ON CONFLICT (id_users) DO NOTHING
@@ -168,7 +166,6 @@ def insert_tweet(connection,tweet):
         'name': remove_nulls(tweet['user']['name']),
         'location': remove_nulls(tweet['user']['location']),
         'description': remove_nulls(tweet['user']['description']),
-        'geo_enabled': tweet['user']['geo_enabled'],
         'withheld_in_countries': tweet['user'].get('withheld_in_countries')
     })
     ########################################
@@ -192,10 +189,9 @@ def insert_tweet(connection,tweet):
                 geo_coords+=')'
             geo_coords+=')'
             geo_str = 'MULTIPOLYGON'
-        except KeyError:
-            if tweet['user']['geo_enabled']:
-                geo_str = None
-                geo_coords = None
+        except (KeyError, TypeError):
+            geo_str = None
+            geo_coords = None
 
     if geo_coords is None:
         geo_wkt = None
@@ -244,58 +240,62 @@ def insert_tweet(connection,tweet):
             id_tweets,
             id_users,
             created_at,
-            text,
-            source,
             in_reply_to_status_id,
-            in_reply_to_userid,
+            in_reply_to_user_id,
             quoted_status_id,
-            is_quote_status,
+            geo,
             retweet_count,
+            quote_count,
             favorite_count,
-            lang,
+            withheld_copyright,
+            withheld_in_countries,
+            place_name,
             country_code,
             state_code,
-            place_name,
-            geo_type,
-            geo_coordinates
+            lang,
+            text,
+            source
         ) VALUES (
             :id_tweets,
             :id_users,
             :created_at,
-            :text,
-            :source,
             :in_reply_to_status_id,
-            :in_reply_to_userid,
+            :in_reply_to_user_id,
             :quoted_status_id,
-            :is_quote_status,
+            ST_GeomFromText(:geo_wkt, 4326),
             :retweet_count,
+            :quote_count,
             :favorite_count,
-            :lang,
+            :withheld_copyright,
+            :withheld_in_countries,
+            :place_name,
             :country_code,
             :state_code,
-            :place_name,
-            :geo_type,
-            ST_GeomFromText(:geo_coordinates, 4326) 
+            :lang,
+            :text,
+            :source
         )
+        ON CONFLICT DO NOTHING
     ''')
     connection.execute(sql, {
         'id_tweets': tweet['id'],
         'id_users': tweet['user']['id'],
         'created_at': tweet['created_at'],
-        'text': remove_nulls(tweet.get('extended_tweet', {}).get('full_text', tweet['text'])),
-        'source': remove_nulls(tweet['source']),
         'in_reply_to_status_id': tweet.get('in_reply_to_status_id'),
-        'in_reply_to_userid': tweet.get('in_reply_to_user_id'),
+        'in_reply_to_user_id': tweet.get('in_reply_to_user_id'),
         'quoted_status_id': tweet.get('quoted_status_id'),
-        'is_quote_status': tweet.get('is_quote_status', False),
-        'retweet_count': tweet['retweet_count'],
-        'favorite_count': tweet.get('favorite_count', 0),
-        'lang': tweet.get('lang'),
+        'geo_wkt': geo_wkt,
+        'retweet_count': tweet.get('retweet_count'),
+        'quote_count': tweet.get('quote_count'),
+        'favorite_count': tweet.get('favorite_count'),
+        'withheld_copyright': tweet.get('withheld_copyright'),
+        'withheld_in_countries': tweet.get('withheld_in_countries'),
+        'place_name': place_name,
         'country_code': country_code,
         'state_code': state_code,
-        'place_name': place_name,
-        'geo_type': geo_str,
-        'geo_coordinates': geo_wkt
+        'lang': tweet.get('lang'),
+        'text': remove_nulls(text),
+        'source': remove_nulls(tweet.get('source'))
     })
     ########################################
     # insert into the tweet_urls table
@@ -312,6 +312,7 @@ def insert_tweet(connection,tweet):
         sql = sqlalchemy.sql.text('''
             INSERT INTO tweet_urls (id_tweets, id_urls)
             VALUES (:id_tweets, :id_urls)
+            ON CONFLICT DO NOTHING
         ''')
         connection.execute(sql, {
             'id_tweets': tweet['id'],
@@ -391,12 +392,14 @@ def insert_tweet(connection,tweet):
     for medium in media:
         id_urls = get_id_urls(medium['media_url'], connection)
         sql = sqlalchemy.sql.text('''
-            INSERT INTO tweet_media (id_tweets, id_urls)
-            VALUES (:id_tweets, :id_urls)
+            INSERT INTO tweet_media (id_tweets, id_urls, type)
+            VALUES (:id_tweets, :id_urls, :type)
+            ON CONFLICT DO NOTHING
         ''')
         connection.execute(sql, {
             'id_tweets': tweet['id'],
-            'id_urls': id_urls
+            'id_urls': id_urls,
+            'type': medium['type']
         })
 ################################################################################
 # main functions
